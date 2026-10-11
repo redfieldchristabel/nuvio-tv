@@ -9,6 +9,7 @@ import '../domain/models/content_type.dart';
 import '../domain/models/meta.dart';
 import '../domain/models/stream.dart';
 import '../domain/models/video.dart';
+import '../core/config/app_config.dart';
 import '../core/network/http_client.dart';
 import '../core/tracking/more_like_this_service.dart';
 import '../core/tracking/tracking_services.dart';
@@ -63,6 +64,7 @@ class DetailController extends FamilyAsyncNotifier<DetailData, DetailParams> {
         contentId: params.metaId,
         contentType: params.contentType,
         traktAccessToken: settings?.traktConnected == true ? 'stored' : null,
+        tmdbApiKey: AppConfig.tmdbApiKey,
         preferredSource: MoreLikeThisSource.trakt,
       );
       moreLikeThis = mltResult.valueOrNull ?? const [];

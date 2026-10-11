@@ -98,13 +98,21 @@ class NuvioBackendClient {
   // ---- device login (TV pairing) ----
 
   /// Step 1: start a device login session.
+  ///
+  /// The live backend uses the legacy RPC `start_tv_login_session` with a
+  /// 3-param signature (nonce, redirect, name) returning a LIST with
+  /// {code, web_url, expires_at, poll_interval_seconds}. The modern
+  /// `start_device_login_session` (4 params, object response) is tried
+  /// first and we fall back on "function not found".
   Future<Result<DeviceLoginSession>> startDeviceLoginSession({
     required String deviceNonce,
     String deviceType = 'tv',
     String? deviceName,
   }) async {
-    if (!isConfigured) return Result.err(AppError.unknown('Backend not configured'));
-    final result = await rpc(
+    if (!isConfigured) {
+      return Result.err(AppError.unknown('Backend not configured'));
+    }
+    final modern = await rpc(
       'start_device_login_session',
       {
         'p_device_nonce': deviceNonce,
@@ -114,10 +122,25 @@ class NuvioBackendClient {
           'p_device_name': deviceName,
       },
     );
-    return switch (result) {
-      Ok(:final value) when value is Map<String, dynamic> =>
-        _parseLoginSession(value),
-      Ok() => Result.err(AppError.parse('Empty device login response')),
+    // Modern path succeeded with an object?
+    if (modern.isOk) {
+      final value = modern.valueOrNull;
+      if (value is Map<String, dynamic>) {
+        return _parseLoginSession(value);
+      }
+    }
+    // Legacy path: 3 params, list response.
+    final legacy = await rpc(
+      'start_tv_login_session',
+      {
+        'p_device_nonce': deviceNonce,
+        'p_redirect_base_url': AppConfig.tvLoginWebBaseUrl,
+        if (deviceName != null && deviceName.isNotEmpty)
+          'p_device_name': deviceName,
+      },
+    );
+    return switch (legacy) {
+      Ok(:final value) => _parseLegacySession(value),
       Err(:final error) => Result.err(error),
     };
   }
@@ -143,6 +166,35 @@ class NuvioBackendClient {
     ));
   }
 
+  Result<DeviceLoginSession> _parseLegacySession(dynamic value) {
+    // Legacy returns a LIST: [{code, web_url, expires_at, poll_interval_seconds}]
+    Map<String, dynamic>? entry;
+    if (value is List && value.isNotEmpty) {
+      final first = value.first;
+      if (first is Map<String, dynamic>) entry = first;
+    } else if (value is Map<String, dynamic>) {
+      entry = value;
+    }
+    if (entry == null) {
+      return Result.err(AppError.parse('Empty device login response'));
+    }
+    final code = (entry['code'] ?? entry['deviceCode']) as String?;
+    final webUrl = (entry['web_url'] ??
+            entry['verificationUriComplete'] ??
+            entry['verification_uri_complete']) as String?;
+    if (code == null || code.isEmpty || webUrl == null || webUrl.isEmpty) {
+      return Result.err(AppError.parse('Incomplete device login session'));
+    }
+    return Result.ok(DeviceLoginSession(
+      deviceCode: code,
+      userCode: code, // legacy uses the code as the display code
+      loginUrl: webUrl,
+      verificationUri: AppConfig.tvLoginWebBaseUrl,
+      pollIntervalSeconds:
+          (entry['poll_interval_seconds'] as num?)?.toInt() ?? 3,
+    ));
+  }
+
   /// Step 2: poll status. Returns [DeviceLoginPoll.pending] until approved.
   Future<Result<DeviceLoginPoll>> pollDeviceLogin({
     required String deviceCode,
@@ -152,21 +204,30 @@ class NuvioBackendClient {
     final result = await rpc(
       'poll_tv_login_session',
       {
-        'p_device_code': deviceCode,
+        'p_code': deviceCode,
         'p_device_nonce': deviceNonce,
       },
       accessToken: accessToken,
     );
-    return switch (result) {
-      Ok(:final value) when value is Map<String, dynamic> => Result.ok(
-          DeviceLoginPoll(
-            status: (value['status'] as String?) ?? 'pending',
-            approved: value['approved'] == true,
-          ),
-        ),
-      Ok() => Result.ok(const DeviceLoginPoll(status: 'pending')),
-      Err(:final error) => Result.err(error),
-    };
+    // Live backend returns a LIST: [{status, expires_at, poll_interval_seconds}]
+    if (result.isOk) {
+      final value = result.valueOrNull;
+      Map<String, dynamic>? entry;
+      if (value is List && value.isNotEmpty && value.first is Map<String, dynamic>) {
+        entry = value.first as Map<String, dynamic>;
+      } else if (value is Map<String, dynamic>) {
+        entry = value;
+      }
+      if (entry != null) {
+        final status = (entry['status'] as String?) ?? 'pending';
+        return Result.ok(DeviceLoginPoll(
+          status: status,
+          approved: status == 'approved' || entry['approved'] == true,
+        ));
+      }
+      return Result.ok(const DeviceLoginPoll(status: 'pending'));
+    }
+    return Result.err(result.errorOrNull!);
   }
 
   /// Step 3: exchange the approved code for session tokens.

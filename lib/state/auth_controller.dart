@@ -4,6 +4,8 @@ import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/config/app_config.dart';
+import '../core/network/http_client.dart';
 import '../data/remote/nuvio_backend_client.dart';
 import '../core/util/result.dart';
 import 'settings_controller.dart' show localStoreProvider;
@@ -123,7 +125,12 @@ class AuthController extends AsyncNotifier<NuvioSession?> {
 }
 
 final nuvioBackendClientProvider = Provider<NuvioBackendClient>((ref) {
-  throw UnimplementedError('Override in bootstrap');
+  // Real Nuvio backend from AppConfig (official credentials as defaults).
+  return NuvioBackendClient(
+    HttpClient(),
+    backendUrl: AppConfig.supabaseUrl,
+    publishableKey: AppConfig.supabaseAnonKey,
+  );
 });
 
 final authControllerProvider =
