@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/player/player_controller.dart';
+import '../../../core/skip/skip_segments.dart';
 import '../../../core/theme/theme.dart';
 import '../../../domain/models/meta.dart';
 import 'post_play_overlay.dart';
@@ -48,7 +50,10 @@ class PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
-    controller = PlayerController();
+    controller = PlayerController(
+      skipService: ProviderScope.containerOf(context, listen: false)
+          .read(skipSegmentsProvider),
+    );
     controller.onPersistProgress = widget.onPersistProgress;
     controller.addListener(_onControllerChanged);
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
@@ -222,6 +227,19 @@ class PlayerScreenState extends State<PlayerScreen> {
                               color: NuvioColors.textSecondary, fontSize: 15),
                         ),
                       ],
+                    ),
+                  ),
+
+                // Skip button (intro/recap/outro) — bottom-right, above chrome.
+                if (!_postPlayVisible &&
+                    !_trackMenuVisible &&
+                    controller.activeSkip != null)
+                  Positioned(
+                    right: NuvioSpacing.safeGutter,
+                    bottom: 120,
+                    child: _SkipButton(
+                      label: _skipLabel(controller.activeSkip!.type),
+                      onTap: controller.skipActiveSegment,
                     ),
                   ),
 
@@ -423,5 +441,84 @@ class _ControlButton extends StatelessWidget {
       focusColor: NuvioColors.cardFocused,
       autofocus: false,
     );
+  }
+}
+
+
+/// Skip intro/recap/outro button, ported from the official player's
+/// skip-intro treatment: bottom-right pill, auto-focused when shown.
+class _SkipButton extends StatefulWidget {
+  const _SkipButton({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_SkipButton> createState() => _SkipButtonState();
+}
+
+class _SkipButtonState extends State<_SkipButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      autofocus: true,
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          height: NuvioSpacing.buttonHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          decoration: BoxDecoration(
+            color: _focused
+                ? NuvioColors.text
+                : Colors.black.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: _focused ? NuvioColors.text : Colors.white38),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              color: _focused ? NuvioColors.bg : NuvioColors.text,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _skipLabel(SkipSegmentType type) {
+  switch (type) {
+    case SkipSegmentType.intro:
+    case SkipSegmentType.op:
+    case SkipSegmentType.mixedOp:
+      return 'Skip Intro';
+    case SkipSegmentType.recap:
+      return 'Skip Recap';
+    case SkipSegmentType.ed:
+      return 'Skip Outro';
+    case SkipSegmentType.outro:
+    case SkipSegmentType.mixedEd:
+      return 'Skip Outro';
+    case SkipSegmentType.postCredits:
+      return 'Skip';
+    case SkipSegmentType.preview:
+      return 'Skip Preview';
   }
 }

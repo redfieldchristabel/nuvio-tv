@@ -1,69 +1,84 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nuvio_tv_flutter/core/player/player_controller.dart';
+import 'package:nuvio_tv_flutter/core/storage/local_store.dart';
+import 'package:nuvio_tv_flutter/state/settings_controller.dart';
 import 'package:nuvio_tv_flutter/ui/screens/player/player_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+Future<LocalStore> _setupStore() async {
+  SharedPreferences.setMockInitialValues({});
+  return LocalStore.create();
+}
+
+Widget _wrap(Widget child, {LocalStore? store}) {
+  return ProviderScope(
+    overrides: [
+      if (store != null) localStoreProvider.overrideWithValue(store),
+    ],
+    child: MaterialApp(home: child),
+  );
+}
 
 void main() {
   testWidgets('PlayerScreen renders title and loading state',
       (tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: PlayerScreen(url: 'https://x.test/v.mp4', title: 'Test Movie'),
-      ),
-    );
-    // Loading spinner shows immediately.
+    final store = await _setupStore();
+    await tester.pumpWidget(_wrap(
+      const PlayerScreen(url: 'https://x.test/v.mp4', title: 'Test Movie'),
+      store: store,
+    ));
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    // No crash.
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('PlayerScreen chrome shows title', (tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: PlayerScreen(url: 'https://x.test/v.mp4', title: 'My Title'),
-      ),
-    );
+    final store = await _setupStore();
+    await tester.pumpWidget(_wrap(
+      const PlayerScreen(url: 'https://x.test/v.mp4', title: 'My Title'),
+      store: store,
+    ));
     await tester.pump();
     expect(find.text('My Title'), findsOneWidget);
   });
 
   testWidgets('PlayerScreen error state shows message', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: PlayerScreen(
-          url: 'https://x.test/broken.mp4',
-          title: 'Broken',
-          playerBuilder: (context) {
-            // Simulate immediate error from platform player.
-            context.controller.markError('codec unsupported');
-            return const SizedBox.expand();
-          },
-        ),
+    final store = await _setupStore();
+    await tester.pumpWidget(_wrap(
+      PlayerScreen(
+        url: 'https://x.test/broken.mp4',
+        title: 'Broken',
+        playerBuilder: (context) {
+          context.controller.markError('codec unsupported');
+          return const SizedBox.expand();
+        },
       ),
-    );
+      store: store,
+    ));
     await tester.pumpAndSettle();
     expect(find.text('codec unsupported'), findsOneWidget);
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
   });
 
   testWidgets('OK key toggles play/pause via controller', (tester) async {
+    final store = await _setupStore();
     PlayerController? captured;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: PlayerScreen(
-          url: 'https://x.test/v.mp4',
-          title: 'T',
-          playerBuilder: (context) {
-            captured ??= context.controller;
-            if (captured!.phase == PlayerPhase.loading) {
-              captured!.markReady(const Duration(minutes: 5));
-            }
-            return const SizedBox.expand();
-          },
-        ),
+    await tester.pumpWidget(_wrap(
+      PlayerScreen(
+        url: 'https://x.test/v.mp4',
+        title: 'T',
+        playerBuilder: (context) {
+          captured ??= context.controller;
+          if (captured!.phase == PlayerPhase.loading) {
+            captured!.markReady(const Duration(minutes: 5));
+          }
+          return const SizedBox.expand();
+        },
       ),
-    );
+      store: store,
+    ));
     await tester.pumpAndSettle();
     expect(captured, isNotNull);
     expect(captured!.phase, PlayerPhase.playing);
@@ -78,23 +93,23 @@ void main() {
   });
 
   testWidgets('right arrow seeks forward', (tester) async {
+    final store = await _setupStore();
     PlayerController? captured;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: PlayerScreen(
-          url: 'https://x.test/v.mp4',
-          title: 'T',
-          playerBuilder: (context) {
-            captured ??= context.controller;
-            if (captured!.phase == PlayerPhase.loading) {
-              captured!.markReady(const Duration(minutes: 10));
-              captured!.updatePosition(const Duration(minutes: 1));
-            }
-            return const SizedBox.expand();
-          },
-        ),
+    await tester.pumpWidget(_wrap(
+      PlayerScreen(
+        url: 'https://x.test/v.mp4',
+        title: 'T',
+        playerBuilder: (context) {
+          captured ??= context.controller;
+          if (captured!.phase == PlayerPhase.loading) {
+            captured!.markReady(const Duration(minutes: 10));
+            captured!.updatePosition(const Duration(minutes: 1));
+          }
+          return const SizedBox.expand();
+        },
       ),
-    );
+      store: store,
+    ));
     await tester.pumpAndSettle();
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
@@ -103,11 +118,15 @@ void main() {
   });
 
   testWidgets('escape pops the player', (tester) async {
+    final store = await _setupStore();
     final navigatorKey = GlobalKey<NavigatorState>();
     await tester.pumpWidget(
-      MaterialApp(
-        navigatorKey: navigatorKey,
-        home: const Scaffold(body: SizedBox.shrink()),
+      ProviderScope(
+        overrides: [localStoreProvider.overrideWithValue(store)],
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          home: const Scaffold(body: SizedBox.shrink()),
+        ),
       ),
     );
     navigatorKey.currentState!.push(MaterialPageRoute(
@@ -118,9 +137,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400)); // finish
     expect(find.byType(PlayerScreen), findsOneWidget);
 
-    // Verify keys reach the focus at all: select should toggle play/pause.
-    // (Phase is loading here since no playerBuilder; toggle does nothing but
-    //  proves the handler runs if we check chrome visibility instead.)
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1000));

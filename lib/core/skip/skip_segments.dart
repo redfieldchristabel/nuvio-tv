@@ -1,6 +1,10 @@
 import 'dart:async';
 
-import 'package:nuvio_tv_flutter/core/network/http_client.dart';import 'package:nuvio_tv_flutter/core/util/result.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:nuvio_tv_flutter/core/network/http_client.dart';
+import 'package:nuvio_tv_flutter/core/util/result.dart';
+import 'package:nuvio_tv_flutter/state/settings_controller.dart';
 
 /// A skippable segment of a video (intro, recap, outro, …).
 class SkipSegment {
@@ -189,6 +193,138 @@ class IntroDbProvider implements SkipSegmentProvider {
   }
 }
 
+/// AnimeSkip — GraphQL API for fine-grained anime segment timestamps.
+/// Requires a registered X-Client-ID header.
+///
+/// Episode lookup: AnimeSkip keys episodes by its own episode ids, so we
+/// first search shows by the title's MAL id via the `searchShows` query
+/// (MAL ids are indexed as `anilist/mal` external mappings), then fetch
+/// the season episode's segments. Nothing found / no mapping -> empty.
+class AnimeSkipProvider implements SkipSegmentProvider {
+  AnimeSkipProvider({HttpClient? http, required this.clientId})
+      : _http = http ?? HttpClient();
+
+  final HttpClient _http;
+  final String clientId;
+  static const _endpoint = 'https://api.anime-skip.com/graphql';
+
+  @override
+  String get name => 'anime-skip';
+
+  @override
+  Future<List<SkipSegment>> resolve({
+    required String type,
+    required String? imdbId,
+    required int? season,
+    required int? episode,
+    required int? malId,
+    required int? episodeLengthSec,
+  }) async {
+    if (malId == null || episode == null) return const [];
+
+    // 1. Find the show by MAL external mapping.
+    final showResult = await _query('''
+query(\$mal: String!) {
+  searchShows(search: {externalId: {id: \$mal, source: MAL}}) {
+    shows { id }
+  }
+}''', {'mal': '$malId'});
+    if (showResult.isErr) return const [];
+    final showId = _extractShowId(showResult.valueOrNull);
+    if (showId == null || showId.isEmpty) return const [];
+
+    // 2. Fetch the episode's segments (season-absolute episode number).
+    final epResult = await _query('''
+query(\$show: String!, \$ep: Int!) {
+  episodes(showId: \$show, filter: {isSeason: false, number: \$ep}) {
+    episodes { id segments { type start end } }
+  }
+}''', {'show': showId, 'ep': episode});
+    if (epResult.isErr) return const [];
+    final segmentsRaw = _extractSegments(epResult.valueOrNull);
+
+    // 3. Map AnimeSkip segment types to ours.
+    final out = <SkipSegment>[];
+    for (final s in segmentsRaw.whereType<Map<String, dynamic>>()) {
+      final start = (s['start'] as num?)?.toDouble();
+      final end = (s['end'] as num?)?.toDouble();
+      if (start == null || end == null || end <= start) continue;
+      out.add(SkipSegment(
+        type: _typeFrom(s['type'] as String?),
+        startMs: (start * 1000).round(),
+        endMs: (end * 1000).round(),
+        source: name,
+      ));
+    }
+    return out;
+  }
+
+  /// Debug hook: last raw response body (set when debugCapture is set).
+  static String? Function(String)? debugCapture;
+
+  Future<Result<dynamic>> _query(
+      String query, Map<String, dynamic> variables) async {
+    final result = await _http.postJson(
+      Uri.parse(_endpoint),
+      body: {'query': query, 'variables': variables},
+      headers: {'X-Client-ID': clientId},
+      timeout: const Duration(seconds: 8),
+    );
+    if (debugCapture != null) {
+      debugCapture!(result.isOk ? 'OK: \${result.valueOrNull.toString().substring(0, 80)}' : 'ERR: \${result.errorOrNull?.kind.name} \${result.errorOrNull?.message}');
+    }
+    return result;
+  }
+
+  /// Extract the show id from a searchShows GraphQL response.
+  String? _extractShowId(dynamic value) {
+    final shows = _digList(value, ['data', 'searchShows', 'shows']);
+    if (shows.isEmpty) return null;
+    return shows.first['id']?.toString();
+  }
+
+  /// Extract the raw segments list from an episodes GraphQL response.
+  List<dynamic> _extractSegments(dynamic value) {
+    final episodes = _digList(value, ['data', 'episodes', 'episodes']);
+    if (episodes.isEmpty) return const [];
+    final segments = episodes.first['segments'];
+    return segments is List ? segments : const [];
+  }
+
+  /// Walk a path of map keys; returns the list at the end (empty on any
+  /// shape mismatch).
+  List<Map<String, dynamic>> _digList(dynamic node, List<String> path) {
+    dynamic current = node;
+    for (final key in path) {
+      if (current is! Map) return const [];
+      current = current[key];
+    }
+    if (current is! List) return const [];
+    return current.whereType<Map<String, dynamic>>().toList();
+  }
+
+  SkipSegmentType _typeFrom(String? raw) {
+    switch (raw?.toLowerCase()) {
+      case 'intro':
+      case 'op':
+        return SkipSegmentType.intro;
+      case 'credits':
+      case 'ed':
+        return SkipSegmentType.outro;
+      case 'recap':
+        return SkipSegmentType.recap;
+      case 'preview':
+        return SkipSegmentType.preview;
+      case 'mixed-op':
+        return SkipSegmentType.mixedOp;
+      case 'mixed-ed':
+        return SkipSegmentType.mixedEd;
+      default:
+        return SkipSegmentType.intro;
+    }
+  }
+}
+
 /// Aggregates all providers, caches results per (title, season, episode).
 class SkipSegmentsService {
   SkipSegmentsService({List<SkipSegmentProvider>? providers})
@@ -219,15 +355,23 @@ class SkipSegmentsService {
     if (cached != null) return Future.value(cached);
     return _inFlight.putIfAbsent(key, () async {
       try {
-        final results = await Future.wait(providers.map((p) => p.resolve(
+        // A failing provider must never break the others (or playback):
+        // wait all, swallow individual errors, keep successful results.
+        final settled = await Future.wait(providers.map((p) async {
+          try {
+            return await p.resolve(
               type: type,
               imdbId: imdbId,
               season: season,
               episode: episode,
               malId: malId,
               episodeLengthSec: episodeLengthSec,
-            )));
-        final merged = results.expand((r) => r).toList();
+            );
+          } catch (_) {
+            return const <SkipSegment>[];
+          }
+        }));
+        final merged = settled.expand((r) => r).toList();
         _cache[key] = merged;
         return merged;
       } finally {
@@ -260,3 +404,23 @@ class SkipSegmentsService {
 
   void clearCache() => _cache.clear();
 }
+
+
+/// App-wired skip service: rebuilds when skip settings change so provider
+/// membership (IntroDB on/off, AnimeSkip + client ID) follows the user's
+/// playback settings — mirroring the official Nuvio toggle behaviour.
+final skipSegmentsProvider = Provider<SkipSegmentsService>((ref) {
+  final settings = ref.watch(settingsProvider).valueOrNull ?? const AppSettings();
+  final providers = <SkipSegmentProvider>[];
+  if (settings.skipIntroEnabled) {
+    providers.add(IntroDbProvider());
+    providers.add(AniSkipProvider());
+  }
+  if (settings.animeSkipEnabled) {
+    final clientId = settings.animeSkipClientId;
+    if (clientId != null && clientId.isNotEmpty) {
+      providers.add(AnimeSkipProvider(clientId: clientId));
+    }
+  }
+  return SkipSegmentsService(providers: providers);
+});

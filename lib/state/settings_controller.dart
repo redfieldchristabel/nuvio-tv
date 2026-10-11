@@ -12,6 +12,10 @@ class AppSettings {
   const AppSettings({
     this.experienceMode = ExperienceMode.modern,
     this.skipIntervalSeconds = 10,
+    this.skipIntroEnabled = true,
+    this.autoSkipMode = AutoSkipMode.none,
+    this.animeSkipEnabled = false,
+    this.animeSkipClientId,
     this.autoPlayNext = true,
     this.autoPlayMode = StreamAutoPlayMode.manual,
     this.autoPlayRegex,
@@ -26,6 +30,13 @@ class AppSettings {
 
   final ExperienceMode experienceMode;
   final int skipIntervalSeconds;
+
+  /// Skip-segments feature (mirrors the official Nuvio playback settings).
+  final bool skipIntroEnabled; // master toggle for IntroDB lookups
+  final String autoSkipMode; // none | intro | recap | all (auto-seek past)
+  final bool animeSkipEnabled; // also query AnimeSkip GraphQL
+  final String? animeSkipClientId; // X-Client-ID for AnimeSkip
+
   final bool autoPlayNext;
   final String autoPlayMode; // MANUAL | FIRST_STREAM | REGEX_MATCH
   final String? autoPlayRegex;
@@ -40,6 +51,10 @@ class AppSettings {
   AppSettings copyWith({
     ExperienceMode? experienceMode,
     int? skipIntervalSeconds,
+    bool? skipIntroEnabled,
+    String? autoSkipMode,
+    bool? animeSkipEnabled,
+    String? animeSkipClientId,
     bool? autoPlayNext,
     String? autoPlayMode,
     String? autoPlayRegex,
@@ -54,6 +69,10 @@ class AppSettings {
     return AppSettings(
       experienceMode: experienceMode ?? this.experienceMode,
       skipIntervalSeconds: skipIntervalSeconds ?? this.skipIntervalSeconds,
+      skipIntroEnabled: skipIntroEnabled ?? this.skipIntroEnabled,
+      autoSkipMode: autoSkipMode ?? this.autoSkipMode,
+      animeSkipEnabled: animeSkipEnabled ?? this.animeSkipEnabled,
+      animeSkipClientId: animeSkipClientId ?? this.animeSkipClientId,
       autoPlayNext: autoPlayNext ?? this.autoPlayNext,
       autoPlayMode: autoPlayMode ?? this.autoPlayMode,
       autoPlayRegex: autoPlayRegex ?? this.autoPlayRegex,
@@ -70,6 +89,10 @@ class AppSettings {
   Map<String, dynamic> toJson() => {
         'experienceMode': experienceMode.id,
         'skipIntervalSeconds': skipIntervalSeconds,
+        'skipIntroEnabled': skipIntroEnabled,
+        'autoSkipMode': autoSkipMode,
+        'animeSkipEnabled': animeSkipEnabled,
+        if (animeSkipClientId != null) 'animeSkipClientId': animeSkipClientId,
         'autoPlayNext': autoPlayNext,
         'autoPlayMode': autoPlayMode,
         if (autoPlayRegex != null) 'autoPlayRegex': autoPlayRegex,
@@ -86,6 +109,10 @@ class AppSettings {
     return AppSettings(
       experienceMode: ExperienceModeX.fromId(json['experienceMode'] as String?),
       skipIntervalSeconds: (json['skipIntervalSeconds'] as num?)?.toInt() ?? 10,
+      skipIntroEnabled: json['skipIntroEnabled'] != false,
+      autoSkipMode: (json['autoSkipMode'] as String?) ?? AutoSkipMode.none,
+      animeSkipEnabled: json['animeSkipEnabled'] == true,
+      animeSkipClientId: json['animeSkipClientId'] as String?,
       autoPlayNext: json['autoPlayNext'] != false,
       autoPlayMode: (json['autoPlayMode'] as String?) ?? 'MANUAL',
       autoPlayRegex: json['autoPlayRegex'] as String?,
@@ -106,6 +133,14 @@ class StreamAutoPlayMode {
   static const manual = 'MANUAL';
   static const firstStream = 'FIRST_STREAM';
   static const regexMatch = 'REGEX_MATCH';
+}
+
+/// Which skip segments get skipped automatically (no button press).
+class AutoSkipMode {
+  const AutoSkipMode._();
+  static const none = 'NONE';
+  static const intro = 'INTRO'; // intros + recaps
+  static const all = 'ALL'; // everything incl. outros
 }
 
 /// Settings controller: load/save round-trip through LocalStore.

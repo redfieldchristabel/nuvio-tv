@@ -4,7 +4,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:video_player_avplay/video_player.dart' show AudioTrack, TextTrack, Track;
 
-import 'package:nuvio_tv_flutter/core/skip/skip_segments.dart';
+import '../skip/skip_segments.dart';
+
 
 /// Playback state machine for the player screen.
 ///
