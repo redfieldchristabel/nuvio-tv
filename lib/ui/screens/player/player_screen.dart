@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 
 import '../../../core/player/player_controller.dart';
 import '../../../core/theme/theme.dart';
+import '../../../domain/models/meta.dart';
+import 'post_play_overlay.dart';
 
 /// Full-screen player UI. Owns a [PlayerController]; the actual media
 /// rendering is delegated to the platform player (video_player_tizen on
@@ -37,12 +39,16 @@ class PlayerScreen extends StatefulWidget {
 @visibleForTesting
 class PlayerScreenState extends State<PlayerScreen> {
   late final PlayerController controller;
+  bool _postPlayVisible = false;
+  final List<MetaPreview> _postPlayRecommendations = const [];
+  int? _countdown;
 
   @override
   void initState() {
     super.initState();
     controller = PlayerController();
     controller.onPersistProgress = widget.onPersistProgress;
+    controller.addListener(_onControllerChanged);
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
     _start();
   }
@@ -101,8 +107,47 @@ class PlayerScreenState extends State<PlayerScreen> {
 
 
 
+  void _onControllerChanged() {
+    if (_postPlayVisible) {
+      // Update countdown while visible.
+      final countdown = PostPlayPolicy.countdownSeconds(
+          controller.position, controller.duration);
+      if (countdown != _countdown) {
+        setState(() => _countdown = countdown);
+      }
+      return;
+    }
+    // Auto-open when the policy triggers.
+    final shouldShow = PostPlayPolicy.shouldShow(
+      isSeries: false, // series next-episode lands with episode context
+      position: controller.position,
+      duration: controller.duration,
+      playbackEnded: controller.phase == PlayerPhase.ended,
+    );
+    if (shouldShow && mounted) {
+      setState(() {
+        _postPlayVisible = true;
+        _countdown = PostPlayPolicy.countdownSeconds(
+            controller.position, controller.duration);
+      });
+    }
+  }
+
+  void _closePostPlay() {
+    setState(() => _postPlayVisible = false);
+  }
+
+  void _replay() {
+    setState(() => _postPlayVisible = false);
+    controller.seekTo(Duration.zero);
+    if (controller.phase != PlayerPhase.playing) {
+      controller.togglePlayPause();
+    }
+  }
+
   @override
   void dispose() {
+    controller.removeListener(_onControllerChanged);
     controller.dispose();
     super.dispose();
   }
@@ -158,6 +203,16 @@ class PlayerScreenState extends State<PlayerScreen> {
                         ),
                       ],
                     ),
+                  ),
+
+                // Post-play overlay (recommendations + next episode).
+                if (_postPlayVisible)
+                  PostPlayOverlay(
+                    title: controller.currentTitle ?? '',
+                    recommendations: _postPlayRecommendations,
+                    countdownSeconds: _countdown,
+                    onReplay: _replay,
+                    onClose: _closePostPlay,
                   ),
               ],
             );
