@@ -254,12 +254,18 @@ lib/
 - [ ] Tests: scrobble threshold logic, token refresh
 - [ ] **Deliverable:** watch something → appears in Trakt history
 
-### INC-10 · Profiles + cloud (Supabase, gated)
-- [ ] `ProfileManager`: local profiles (avatar colors, initial), profile switcher on sidebar avatar
-- [ ] Per-profile scoping of: addons, plugins, progress, library, settings (ProfileScopedStore everywhere)
-- [ ] Supabase (only when keys provisioned): device login (QR → nuvio.tv/tv-login), avatar, cloud library sync, member access
-- [ ] Tests: profile isolation
-- [ ] **Deliverable:** multiple profiles, each with own everything
+### INC-10 · Login + sync with the REAL Nuvio backend
+- [x] `NuvioBackendClient`: Supabase-shaped client for the real Nuvio service
+      (rest/v1, rpc, functions/v1 — same shapes as the official client)
+- [x] Device login flow: start_device_login_session → poll_tv_login_session
+      → tv-logins-exchange (QR shows nuvio.tv/tv-login + user code)
+- [ ] `AuthQrSignInScreen`: QR + user code display, poll loop, success state
+- [ ] `SyncCodeScreen`: manual code entry alternative
+- [ ] `DeviceSessionRegistration`: installation id, 15-min re-registration
+- [ ] Profile sync: fetch member profiles from backend, per-profile scoping
+- [ ] Cloud library + watch progress sync (upsert on play, pull on login)
+- [ ] Tests: flow state machines, profile isolation
+- [ ] **Deliverable:** existing Nuvio users log in on TV and everything syncs
 
 ### INC-11 · Settings (complete)
 - [ ] Sections ported from official: General (language, experience mode), Layout (poster shape, card depth, row order), Playback (autoplay, skip interval, resume behavior), Audio (passthrough, compatibility), Subtitles (style: size/color/opacity/delay), P2P (enable, upload, hide stats), Plugins, Integrations (Trakt/Simkl/MDBList/Debrid), Advanced (diagnostics, licenses)

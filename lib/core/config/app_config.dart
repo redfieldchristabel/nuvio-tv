@@ -6,7 +6,9 @@
 class AppConfig {
   const AppConfig._();
 
-  // --- Supabase (profiles, cloud library, member access) ---
+  // --- Nuvio backend (the REAL Nuvio service — this app is a client.
+  //     Existing Nuvio users log in and their profiles/library/sync come
+  //     from Nuvio's own backend. Same config the official clients use.) ---
   static const String supabaseUrl = String.fromEnvironment(
     'NUVIO_SUPABASE_URL',
     defaultValue: '',
@@ -50,8 +52,9 @@ class AppConfig {
   static const String supportersApiBaseUrl = 'https://nuvio.tv/';
   static const String supportUrl = 'https://nuvio.tv/support';
 
-  /// Whether cloud-backed features (profiles, cloud library) are provisioned.
-  static bool get cloudEnabled => supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
+  /// Whether the Nuvio backend is configured (login + sync available).
+  static bool get backendConfigured =>
+      supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 
   /// Whether Trakt integration is provisioned.
   static bool get traktEnabled => traktClientId.isNotEmpty;
