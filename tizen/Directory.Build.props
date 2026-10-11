@@ -1,0 +1,9 @@
+<Project>
+  <!-- Force default (dummy) certificates for development signing.
+       tz's password decryption of .pwd files is broken in this SDK build;
+       default certs produce a dev-installable TPK (not for Seller Portal). -->
+  <PropertyGroup>
+    <AuthorPath></AuthorPath>
+    <DistributorPath></DistributorPath>
+  </PropertyGroup>
+</Project>
