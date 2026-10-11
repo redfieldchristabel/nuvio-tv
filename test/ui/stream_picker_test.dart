@@ -8,6 +8,7 @@ import 'package:nuvio_tv_flutter/domain/models/content_type.dart';
 import 'package:nuvio_tv_flutter/domain/models/stream.dart';
 import 'package:nuvio_tv_flutter/state/detail_controller.dart';
 import 'package:nuvio_tv_flutter/state/home_controller.dart';
+import 'package:nuvio_tv_flutter/state/settings_controller.dart';
 import 'package:nuvio_tv_flutter/ui/screens/stream/stream_picker_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -22,6 +23,7 @@ void main() {
   Widget _wrap(Widget child) {
     return ProviderScope(
       overrides: [
+        localStoreProvider.overrideWithValue(store),
         addonRepositoryProvider
             .overrideWithValue(LocalAddonRepository(store)),
         watchProgressStoreProvider
@@ -40,7 +42,8 @@ void main() {
       params: params,
       onStreamPicked: (_) {},
     )));
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(seconds: 2));
     expect(find.text('No streams found'), findsOneWidget);
   });
 
@@ -53,7 +56,8 @@ void main() {
       params: params,
       onStreamPicked: (_) {},
     )));
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(seconds: 2));
     expect(tester.takeException(), isNull);
   });
 
@@ -64,7 +68,8 @@ void main() {
       params: params,
       onStreamPicked: (s) => picked = s,
     )));
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(seconds: 2));
     // Empty state: nothing to pick, but callback wiring compiles.
     expect(picked, isNull);
   });

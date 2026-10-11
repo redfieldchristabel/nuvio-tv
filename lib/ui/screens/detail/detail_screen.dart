@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/theme.dart';
 import '../../../domain/models/video.dart';
+import '../../components/poster_card.dart';
+import '../../components/catalog_row_widget.dart';
 import '../../../state/detail_controller.dart';
 
 /// Detail screen: hero, description, episodes (series), stream entry.
@@ -156,6 +158,16 @@ class _DetailContent extends StatelessWidget {
         // Episodes (series only)
         if (meta.type.isSeries && meta.videos.isNotEmpty)
           _EpisodesSection(data: data),
+        // More Like This row
+        if (data.moreLikeThis.isNotEmpty)
+          SliverToBoxAdapter(
+            child: CatalogRowWidget(
+              title: 'More Like This',
+              itemCount: data.moreLikeThis.length,
+              itemBuilder: (context, index) =>
+                  PosterCard(item: data.moreLikeThis[index]),
+            ),
+          ),
         const SliverToBoxAdapter(child: SizedBox(height: 40)),
       ],
     );

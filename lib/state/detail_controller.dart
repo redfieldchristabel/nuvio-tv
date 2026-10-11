@@ -4,10 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/repositories/catalog_repository_impl.dart';
 import 'home_controller.dart' show addonsProvider, watchProgressStoreProvider;
+import 'settings_controller.dart' show settingsProvider;
 import '../domain/models/content_type.dart';
 import '../domain/models/meta.dart';
 import '../domain/models/stream.dart';
 import '../domain/models/video.dart';
+import '../core/network/http_client.dart';
+import '../core/tracking/more_like_this_service.dart';
+import '../core/tracking/tracking_services.dart';
 import '../domain/models/watch_progress.dart';
 import '../domain/repositories/stream_logic.dart';
 
@@ -49,11 +53,31 @@ class DetailController extends FamilyAsyncNotifier<DetailData, DetailParams> {
       videoId: params.videoId,
     );
 
+    // More-like-this: best-effort, never blocks the detail screen.
+    List<MetaPreview> moreLikeThis = const [];
+    String? mltSource;
+    try {
+      final mltService = ref.watch(moreLikeThisServiceProvider);
+      final settings = ref.watch(settingsProvider).valueOrNull;
+      final mltResult = await mltService.fetch(
+        contentId: params.metaId,
+        contentType: params.contentType,
+        traktAccessToken: settings?.traktConnected == true ? 'stored' : null,
+        preferredSource: MoreLikeThisSource.trakt,
+      );
+      moreLikeThis = mltResult.valueOrNull ?? const [];
+      if (moreLikeThis.isNotEmpty) mltSource = 'trakt';
+    } catch (_) {
+      // Non-fatal.
+    }
+
     return DetailData(
       meta: meta,
       streams: streamResult.valueOrNull ?? const [],
       watchedEpisodes: watchedEpisodes,
       progress: progress,
+      moreLikeThis: moreLikeThis,
+      moreLikeThisSource: mltSource,
     );
   }
 
@@ -119,12 +143,16 @@ class DetailData {
     required this.streams,
     required this.watchedEpisodes,
     this.progress,
+    this.moreLikeThis = const [],
+    this.moreLikeThisSource,
   });
 
   final Meta meta;
   final List<Stream> streams;
   final Set<String> watchedEpisodes;
   final WatchProgress? progress;
+  final List<MetaPreview> moreLikeThis;
+  final String? moreLikeThisSource;
 
   /// Next unwatched episode (for the Play/Resume button).
   Video? nextUpEpisode() {
@@ -141,6 +169,13 @@ final detailControllerProvider = AsyncNotifierProvider.family<DetailController,
 
 final metaRepositoryProvider = Provider<MetaRepository>((ref) {
   return MetaRepository();
+});
+
+final moreLikeThisServiceProvider = Provider<MoreLikeThisService>((ref) {
+  return MoreLikeThisService(
+    HttpClient(),
+    trakt: TraktService(HttpClient(), clientId: '', clientSecret: ''),
+  );
 });
 
 final streamRepositoryProvider = Provider<StreamRepository>((ref) {
