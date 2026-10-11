@@ -5,6 +5,7 @@ import '../../../core/player/player_controller.dart';
 import '../../../core/theme/theme.dart';
 import '../../../domain/models/meta.dart';
 import 'post_play_overlay.dart';
+import 'track_menu.dart';
 
 /// Full-screen player UI. Owns a [PlayerController]; the actual media
 /// rendering is delegated to the platform player (video_player_tizen on
@@ -40,6 +41,7 @@ class PlayerScreen extends StatefulWidget {
 class PlayerScreenState extends State<PlayerScreen> {
   late final PlayerController controller;
   bool _postPlayVisible = false;
+  bool _trackMenuVisible = false;
   final List<MetaPreview> _postPlayRecommendations = const [];
   int? _countdown;
 
@@ -83,7 +85,16 @@ class PlayerScreenState extends State<PlayerScreen> {
       return true;
     }
     if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
+      if (_trackMenuVisible) {
+        setState(() => _trackMenuVisible = false);
+        return true;
+      }
       Navigator.of(context).pop();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.contextMenu) {
+      setState(() => _trackMenuVisible = !_trackMenuVisible);
+      controller.showChrome();
       return true;
     }
     if (key == LogicalKeyboardKey.mediaPlay) {
@@ -131,7 +142,16 @@ class PlayerScreenState extends State<PlayerScreen> {
             controller.position, controller.duration);
       });
     }
+    // Load track lists once playback starts.
+    if (controller.phase == PlayerPhase.playing &&
+        controller.audioTracks.isEmpty &&
+        !_tracksLoaded) {
+      _tracksLoaded = true;
+      controller.refreshTracks();
+    }
   }
+
+  bool _tracksLoaded = false;
 
   void _closePostPlay() {
     setState(() => _postPlayVisible = false);
@@ -203,6 +223,13 @@ class PlayerScreenState extends State<PlayerScreen> {
                         ),
                       ],
                     ),
+                  ),
+
+                // Audio/subtitle track menu.
+                if (_trackMenuVisible)
+                  TrackMenu(
+                    controller: controller,
+                    onClose: () => setState(() => _trackMenuVisible = false),
                   ),
 
                 // Post-play overlay (recommendations + next episode).
